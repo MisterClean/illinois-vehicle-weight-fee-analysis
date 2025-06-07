@@ -1,0 +1,32 @@
+{
+    "id": "A6A7C4C8",
+    "path": "~/dev/r/illinois-vehicle-weight-fee-analysis/policy-analysis.Rmd",
+    "project_path": "policy-analysis.Rmd",
+    "type": "r_markdown",
+    "hash": "3157693126",
+    "contents": "",
+    "dirty": false,
+    "created": 1749312533383.0,
+    "source_on_save": false,
+    "relative_order": 1,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "18,43",
+        "scrollLine": "11",
+        "rmdVisualMode": "true",
+        "rmdVisualCollapsedChunks": "",
+        "rmdVisualModeLocation": "1667:737.5",
+        "rmdVisualWrapConfigured": "true",
+        "docOutlineVisible": "1",
+        "last_setup_crc32": "26ed3a2c1a3d2867"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1749313183,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1749313183568,
+    "read_only": false,
+    "read_only_alternatives": []
+}

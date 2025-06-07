@@ -1,0 +1,8 @@
+"0","total_vehicles <- 8.4e6     # passenger + B-truck"
+"0","flat_fee       <- 151       # IL uniform fee"
+"0",""
+"0","schedule <- data.frame("
+"0","  class    = c('≤3,499', '3,500–4,999', '5,000–5,999', '≥6,000'),"
+"0","  fee      = c(72, 175, 250, 500),"
+"0","  midpoint = c(3000, 4250, 5500, 6500)"
+"0",")"
