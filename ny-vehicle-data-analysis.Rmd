@@ -1,0 +1,290 @@
+---
+title: 'New York Vehicle Weight Distribution Analysis'
+subtitle: 'VIN-Based Fleet Weight Distribution by Model Year'
+author: 'Michael McLean | mclean.bsky.social'
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  html_document:
+    toc: false
+    theme: flatly
+    css: |
+      body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+      .main-container { max-width: 1200px; }
+      h1, h2, h3 { color: #2E86AB; }
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+# Load required libraries
+library(httr2)
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+
+# Set global options
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 12,
+  fig.height = 8,
+  fig.align = "center"
+)
+
+# Define EPA-style weight bins (matching the figure you showed)
+weight_bins <- c(0, 2750, 3000, 3500, 4000, 4500, 5000, 5500, 6000, Inf)
+weight_labels <- c("<2750", "2750-3000", "3000-3500", "3500-4000", "4000-4500", "4500-5000", "5000-5500", "5500-6000", "≥6000")
+```
+
+# New York Vehicle Weight Distribution
+
+This analysis examines the weight distribution of registered passenger
+vehicles in New York State using VIN-level data from the NY DMV
+registration database. The data is filtered to passenger vehicles only
+(VEH record type) and shows how the fleet weight distribution has
+evolved over time.
+
+```{r data-fetch, echo=false}
+# Function to fetch NY vehicle data with pagination
+fetch_ny_vehicle_data <- function(max_records = NULL, batch_size = 50000) {
+  
+  cat("Fetching New York vehicle registration data with pagination...\n")
+  
+  # Base URL for individual vehicle records (not pre-aggregated)
+  base_url <- "https://data.ny.gov/resource/w4pv-hbkt.json"
+  
+  # Initialize variables for pagination
+  all_data <- list()
+  offset <- 0
+  batch_num <- 1
+  total_fetched <- 0
+  
+  repeat {
+    cat("Fetching batch", batch_num, "(offset:", scales::comma(offset), ")...\n")
+    
+    # Build query parameters
+    query_params <- list(
+      `$where` = "record_type = 'VEH'",  # Filter to passenger vehicles only
+      `$select` = "model_year,unladen_weight,vin",  # Select only needed columns
+      `$limit` = batch_size,
+      `$offset` = offset,
+      `$order` = "model_year"  # Order for consistent pagination
+    )
+    
+    # Make the API request
+    tryCatch({
+      response <- request(base_url) %>%
+        req_url_query(!!!query_params) %>%
+        req_perform()
+      
+      # Parse JSON response
+      batch_data <- response %>%
+        resp_body_json(simplifyVector = TRUE)
+      
+      # Check if we got any data
+      if (length(batch_data) == 0 || nrow(as_tibble(batch_data)) == 0) {
+        cat("No more data available. Stopping pagination.\n")
+        break
+      }
+      
+      # Convert to tibble and store
+      batch_tibble <- as_tibble(batch_data)
+      all_data[[batch_num]] <- batch_tibble
+      
+      batch_records <- nrow(batch_tibble)
+      total_fetched <- total_fetched + batch_records
+      
+      cat("Batch", batch_num, "completed:", scales::comma(batch_records), "records\n")
+      cat("Total fetched so far:", scales::comma(total_fetched), "records\n")
+      
+      # Check if we've reached the maximum records limit
+      if (!is.null(max_records) && total_fetched >= max_records) {
+        cat("Reached maximum records limit (", scales::comma(max_records), "). Stopping.\n")
+        break
+      }
+      
+      # Check if we got fewer records than requested (end of data)
+      if (batch_records < batch_size) {
+        cat("Received fewer records than requested. End of data reached.\n")
+        break
+      }
+      
+      # Update for next iteration
+      offset <- offset + batch_size
+      batch_num <- batch_num + 1
+      
+      # Add a small delay to be respectful to the API
+      Sys.sleep(0.5)
+      
+    }, error = function(e) {
+      cat("Error fetching batch", batch_num, ":", e$message, "\n")
+      break
+    })
+  }
+  
+  # Combine all batches
+  if (length(all_data) > 0) {
+    combined_data <- bind_rows(all_data)
+    cat("\nData fetching completed!\n")
+    cat("Total batches:", length(all_data), "\n")
+    cat("Total records:", scales::comma(nrow(combined_data)), "\n")
+    cat("Unique VINs:", scales::comma(n_distinct(combined_data$vin)), "\n")
+    
+    return(combined_data)
+  } else {
+    cat("No data was fetched.\n")
+    return(tibble())
+  }
+}
+
+# Fetch the data (limit to 200k records for initial analysis)
+ny_raw_data <- fetch_ny_vehicle_data(max_records = 13000000, batch_size = 50000)
+```
+
+```{r data-processing, echo=false}
+# Clean and process the data
+ny_processed <- ny_raw_data %>%
+  # Convert columns to appropriate types
+  mutate(
+    model_year = as.numeric(model_year),
+    unladen_weight = as.numeric(unladen_weight)
+  ) %>%
+  # Filter for reasonable model years and weights
+  filter(
+    model_year >= 1970 & model_year <= 2025,
+    unladen_weight > 0 & unladen_weight <= 15000,  # Reasonable weight range
+    !is.na(model_year) & !is.na(unladen_weight) & !is.na(vin)
+  ) %>%
+  # Remove duplicate VINs (keep first occurrence)
+  distinct(vin, .keep_all = TRUE) %>%
+  # Create EPA-style weight bins
+  mutate(
+    weight_class = cut(unladen_weight, 
+                      breaks = weight_bins, 
+                      labels = weight_labels, 
+                      right = FALSE, 
+                      include.lowest = TRUE)
+  ) %>%
+  # Remove any rows where weight_class couldn't be assigned
+  filter(!is.na(weight_class))
+
+# Calculate shares by model year and weight class
+weight_distribution <- ny_processed %>%
+  group_by(model_year, weight_class) %>%
+  summarise(
+    vehicles = n(),  # Count individual vehicles instead of summing pre-aggregated counts
+    .groups = "drop"
+  ) %>%
+  group_by(model_year) %>%
+  mutate(
+    year_total = sum(vehicles),
+    share = vehicles / year_total
+  ) %>%
+  ungroup() %>%
+  # Complete the data to ensure all weight classes are present for each year
+  complete(model_year, weight_class, fill = list(vehicles = 0, share = 0)) %>%
+  group_by(model_year) %>%
+  mutate(
+    year_total = sum(vehicles),
+    share = if_else(year_total > 0, vehicles / year_total, 0)
+  ) %>%
+  ungroup()
+```
+
+## Weight Class Distribution by Model Year
+
+This chart replicates the EPA's Figure 3.6 format, showing how New
+York's passenger vehicle fleet weight distribution has changed over
+time. Each colored band represents a different weight class, with the
+height showing that class's share of total vehicle registrations for
+each model year.
+
+```{r stacked-area-plot, echo=false}
+# Create the stacked area plot matching EPA Figure 3.6 style
+weight_distribution %>%
+  filter(model_year >= 1970) %>%
+  ggplot(aes(x = model_year, y = share, fill = weight_class)) +
+  geom_area(position = "stack", alpha = 0.9) +
+  scale_fill_manual(
+    name = "Weight (lb)",
+    values = c(
+      "<2750" = "#1f4e79",           # Dark blue
+      "2750-3000" = "#2e5f8a",       # Medium dark blue  
+      "3000-3500" = "#4472a8",       # Medium blue
+      "3500-4000" = "#6ba6cd",       # Light blue
+      "4000-4500" = "#a2c4e0",       # Very light blue
+      "4500-5000" = "#f4e4a6",       # Light yellow
+      "5000-5500" = "#f2cc8f",       # Light orange
+      "5500-6000" = "#e07b39",       # Orange
+      "≥6000" = "#d73027"            # Red
+    )
+  ) +
+  scale_x_continuous(
+    breaks = seq(1970, 2025, 5),
+    limits = c(1970, 2025)
+  ) +
+  scale_y_continuous(
+    labels = percent_format(),
+    breaks = seq(0, 1, 0.25),
+    limits = c(0, 1)
+  ) +
+  labs(
+    title = "Weight Class Distribution by Model Year",
+    subtitle = "New York State Passenger Vehicle Registrations",
+    x = "Model Year",
+    y = "Share of Active Passenger Vehicle Registrations",
+    caption = "Data: NY DMV Vehicle Registration Database | VEH records only"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", color = "#2E86AB"),
+    plot.subtitle = element_text(size = 14, color = "#457B9D"),
+    axis.title = element_text(color = "#457B9D"),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray95", size = 0.5),
+    plot.caption = element_text(size = 10, color = "gray60")
+  ) +
+  guides(fill = guide_legend(reverse = TRUE, ncol = 1))
+```
+
+## Summary Statistics
+
+```{r summary-stats, echo=false}
+# Calculate some key statistics
+recent_years <- weight_distribution %>%
+  filter(model_year >= 2020) %>%
+  group_by(weight_class) %>%
+  summarise(
+    avg_share = mean(share, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(avg_share))
+
+total_vehicles <- nrow(ny_processed)  # Count individual vehicles
+year_range <- range(ny_processed$model_year)
+
+cat("Dataset Summary:\n")
+cat("Total passenger vehicles:", scales::comma(total_vehicles), "\n")
+cat("Model year range:", year_range[1], "-", year_range[2], "\n")
+cat("Weight range:", scales::comma(min(ny_processed$unladen_weight)), "-", 
+    scales::comma(max(ny_processed$unladen_weight)), "lbs\n\n")
+
+cat("Recent years (2020+) weight distribution:\n")
+for(i in 1:nrow(recent_years)) {
+  cat(recent_years$weight_class[i], ":", 
+      scales::percent(recent_years$avg_share[i], accuracy = 0.1), "\n")
+}
+```
+
+------------------------------------------------------------------------
+
+*Data source: New York State DMV Vehicle Registration Database via NY
+[Open Data
+Portal](https://data.ny.gov/Transportation/Vehicle-Snowmobile-and-Boat-Registrations/w4pv-hbkt/about_data).
+Analysis limited to passenger vehicles (VEH record type) only.*
