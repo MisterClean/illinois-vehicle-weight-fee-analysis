@@ -1,4 +1,0 @@
-"0",""
-"0","ggplot(alt_sched, aes(midpoint, fee)) +"
-"0","  geom_point(size = 3) + geom_line() +"
-"0","  labs(title = 'Six‑tier illustrative schedule', x = 'Vehicle curb weight (lb)', y = 'Annual fee (USD)')"
