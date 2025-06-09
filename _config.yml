@@ -1,0 +1,22 @@
+# GitHub Pages configuration
+title: "Illinois Vehicle Weight Fee Analysis"
+description: "Policy analysis of vehicle weight fees in Illinois"
+
+# Use the default GitHub Pages theme
+theme: minima
+
+# Include HTML files
+include:
+  - "*.html"
+
+# Plugins
+plugins:
+  - jekyll-relative-links
+
+# Relative links configuration
+relative_links:
+  enabled: true
+  collections: true
+
+# Markdown processor
+markdown: kramdown
