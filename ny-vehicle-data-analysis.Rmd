@@ -155,8 +155,7 @@ ny_processed <- ny_raw_data %>%
   ) %>%
   # Filter for reasonable model years and weights
   filter(
-    model_year >= 1970 & model_year <= 2025,
-    unladen_weight > 0 & unladen_weight <= 15000,  # Reasonable weight range
+    unladen_weight > 0,
     !is.na(model_year) & !is.na(unladen_weight) & !is.na(vin)
   ) %>%
   # Remove duplicate VINs (keep first occurrence)
@@ -205,7 +204,7 @@ each model year.
 
 ```{r stacked-area-plot, echo=false}
 # Create the stacked area plot matching EPA Figure 3.6 style
-weight_distribution %>%
+weight_distribution_chart <- weight_distribution %>% 
   filter(model_year >= 1970) %>%
   ggplot(aes(x = model_year, y = share, fill = weight_class)) +
   geom_area(position = "stack", alpha = 0.9) +
@@ -256,30 +255,76 @@ weight_distribution %>%
 ## Summary Statistics
 
 ```{r summary-stats, echo=false}
-# Calculate some key statistics
-recent_years <- weight_distribution %>%
-  filter(model_year >= 2020) %>%
-  group_by(weight_class) %>%
-  summarise(
-    avg_share = mean(share, na.rm = TRUE),
-    .groups = "drop"
+library(dplyr)
+library(kableExtra)
+library(scales)
+
+# Create the summary with proper ordering and total row
+weight_summary_formatted <- weight_summary %>%
+  # Create a sorting key for proper weight class ordering
+  mutate(
+    sort_order = case_when(
+      weight_class == "<2750" ~ 1,
+      weight_class == "2750-3000" ~ 2,
+      weight_class == "3000-3500" ~ 3,
+      weight_class == "3500-4000" ~ 4,
+      weight_class == "4000-4500" ~ 5,
+      weight_class == "4500-5000" ~ 6,
+      weight_class == "5000-5500" ~ 7,
+      weight_class == "5500-6000" ~ 8,
+      weight_class == "≥6000" ~ 9,
+      TRUE ~ 10
+    )
   ) %>%
-  arrange(desc(avg_share))
+  arrange(sort_order) %>%
+  select(-sort_order) %>%
+  # Add total row
+  bind_rows(
+    summarise(., 
+              weight_class = "Total",
+              total_vehicles = sum(total_vehicles),
+              share_of_total = 1.0)
+  ) %>%
+  # Format the weight classes with commas
+  mutate(
+    weight_class_formatted = case_when(
+      weight_class == "<2750" ~ "<2,750",
+      weight_class == "2750-3000" ~ "2,750-3,000", 
+      weight_class == "3000-3500" ~ "3,000-3,500",
+      weight_class == "3500-4000" ~ "3,500-4,000",
+      weight_class == "4000-4500" ~ "4,000-4,500",
+      weight_class == "4500-5000" ~ "4,500-5,000",
+      weight_class == "5000-5500" ~ "5,000-5,500",
+      weight_class == "5500-6000" ~ "5,500-6,000",
+      weight_class == "≥6000" ~ "≥6,000",
+      TRUE ~ weight_class
+    ),
+    total_vehicles = comma(total_vehicles),
+    share_of_total = percent(share_of_total, accuracy = 0.1)
+  ) %>%
+  select(weight_class_formatted, total_vehicles, share_of_total)
 
-total_vehicles <- nrow(ny_processed)  # Count individual vehicles
-year_range <- range(ny_processed$model_year)
-
-cat("Dataset Summary:\n")
-cat("Total passenger vehicles:", scales::comma(total_vehicles), "\n")
-cat("Model year range:", year_range[1], "-", year_range[2], "\n")
-cat("Weight range:", scales::comma(min(ny_processed$unladen_weight)), "-", 
-    scales::comma(max(ny_processed$unladen_weight)), "lbs\n\n")
-
-cat("Recent years (2020+) weight distribution:\n")
-for(i in 1:nrow(recent_years)) {
-  cat(recent_years$weight_class[i], ":", 
-      scales::percent(recent_years$avg_share[i], accuracy = 0.1), "\n")
-}
+# Create the kable
+weight_summary_formatted %>%
+  kable(
+    col.names = c("Weight Class (lbs)", "Total Vehicles", "Share of Total"),
+    caption = "Vehicle Distribution by Weight Class",
+    align = c("l", "r", "r"),
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#2c3e50") %>%
+  row_spec(nrow(weight_summary_formatted), bold = TRUE, background = "#f8f9fa") %>%
+  column_spec(1, bold = TRUE) %>%
+  footnote(
+    general = "Based on vehicle registration data across all years in dataset.",
+    general_title = "",
+    footnote_as_chunk = TRUE
+  )
 ```
 
 ------------------------------------------------------------------------
